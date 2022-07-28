@@ -39,6 +39,8 @@
 #include "oledDisplayManager_V1_1.h"
 #include "teamAt_GC9A01_dma_V1_0.h"
 
+#include "imu.h"
+
 #include <String>
 /* USER CODE END Includes */
 
@@ -59,6 +61,14 @@
 /* Private variables ---------------------------------------------------------*/
 
 /* USER CODE BEGIN PV */
+
+#define LPTIMER_PERIOD	(16000-412) // avleur ajouter poru avoir le plus près possible de 10 ms
+#define TASK10MS_COUNTER 20
+volatile int task10msTimer = TASK10MS_COUNTER;
+volatile uint8_t flagTask10ms;
+
+char serialOutLine[200];	// Buffer for string to send serial buffer
+
 ///étape 1: Instance du manager de communication
 dmaSpiManagerClass spiManager(&hspi1); // For SPI display
 
@@ -80,10 +90,13 @@ SCREEN_WIDTH ,SCREEN_HEIGHT 	// Définir la grosseur de l'écran utilisé
 );
 
 ///étape 4: Instance du gestionnaire d'affichage
-#define DISPLAY_REFRESH_PERIOD  50    // Screen will be refreshed every 50 ms
+#define DISPLAY_REFRESH_PERIOD  50   // Screen will be refreshed every 50 ms
 oledDisplayManager dispManager1(
 		&display1,					// Relier l'afficheur avec le gestionnaire d'affichage
 		DISPLAY_REFRESH_PERIOD); 	// Définir la période d'affichage désirée ( refresh rate)
+
+
+
 
 
 /* USER CODE END PV */
@@ -134,18 +147,18 @@ int main(void)
   MX_DMA_Init();
   MX_ADC1_Init();
   //MX_CRC_Init();
-  //MX_I2C1_Init();
+  MX_I2C1_Init();
   //MX_IWDG_Init();
-  //MX_LPTIM1_Init();
+  MX_LPTIM1_Init();
   //MX_LPTIM2_Init();
-  //MX_LPUART1_UART_Init();
+  MX_LPUART1_UART_Init();
   //MX_RF_Init();
   //MX_RTC_Init();
   MX_SPI1_Init();
   //MX_SPI2_Init();
   //MX_TIM1_Init();
   MX_TIM2_Init();
-  //MX_TIM17_Init();
+  MX_TIM17_Init();
   //MX_WWDG_Init();
   //MX_USB_Device_Init();
   /* USER CODE BEGIN 2 */
@@ -155,20 +168,45 @@ int main(void)
   /* Infinite loop */
   /* USER CODE BEGIN WHILE */
 
-  HAL_GPIO_WritePin(OUT_TFT_CS_GPIO_Port, OUT_TFT_CS_Pin, GPIO_PIN_SET);
+
+	// Enable Timer 17 interrupts
+  	HAL_NVIC_EnableIRQ(LPTIM1_IRQn);
+  	HAL_LPTIM_Counter_Start_IT(&hlptim1, LPTIMER_PERIOD);
 
 
 
-  	TIM2->CCR1 = 1000; // 75%
-  	HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
-  ///Démarrer le gestionnaire d'affichage
+
+	// Initialisation Display
+	HAL_GPIO_WritePin(OUT_TFT_CS_GPIO_Port, OUT_TFT_CS_Pin, GPIO_PIN_SET);
+	TIM2->CCR1 = 1000; // 100% pendant la config
+	HAL_TIM_PWM_Start(&htim2,TIM_CHANNEL_1);
+	///Démarrer le gestionnaire d'affichage
 	dispManager1.start();
 
-	/// Afficheur prêt à être utilisé
+	//Make sur display is cleared;
+	TIM2->CCR1 = 750; // 75%
+	dispManager1.display->clearDisplay(BLACK);
+	dispManager1.display->display();
+	display1.waitForTxComplete();
+	dispManager1.display->displayOn();
 
 
-	 TIM2->CCR1 = 750; // 75%
+  	// Initialisation of the IMUs. Modify this function to change the humber of IMUs of parameter settings
+	int imuInitStatus = imuInit();
 
+	if (imuInitStatus) // Error
+	{
+		char errorCode[40];
+		sprintf(errorCode, "x:%d", imuInitStatus);
+		dispManager1.widget_2Row(40, 40, 160, 160,
+		  "IMU ERROR", TEXTSTYLE_SIZE_3|RED,
+		  errorCode, TEXTSTYLE_SIZE_2|WHITE,
+		  W_CENTER_ALIGN, 0, BORDERSTYLE_CIRCLE|BLUE);
+	}
+
+
+	/// Splash screen
+	TIM2->CCR1 = 750; // 75%
 	dispManager1.display->clearDisplay(BLACK);
 	dispManager1.display->displayOn();
 	dispManager1.display->display();
@@ -179,24 +217,155 @@ int main(void)
 			  "Cortex Mini", TEXTSTYLE_SIZE_3|BLUE,
 			  "Version 0.1", TEXTSTYLE_SIZE_2|GREEN,
 			  W_CENTER_ALIGN, 0, BORDERSTYLE_CIRCLE|BLUE);
-		dispManager1.display->display();
-		display1.waitForTxComplete();
+	dispManager1.display->display();
+	display1.waitForTxComplete();
 	dispManager1.display->display();
 	display1.waitForTxComplete();
 
+    // test de luminosité
+	delay(100);
+	TIM2->CCR1 = 600;
+	delay(100);
+	TIM2->CCR1 = 500;
+	delay(100);
+	TIM2->CCR1 = 400;
+	delay(100);
+	TIM2->CCR1 = 500;
+	delay(100);
+	TIM2->CCR1 = 400;
+	delay(100);
+	TIM2->CCR1 = 300;
+	delay(100);
+	TIM2->CCR1 = 200;
+	dispManager1.display->clearDisplay(BLACK);
+	display1.waitForTxComplete();
+	delay(1000);
+	TIM2->CCR1 = 750;
 
-    delay(1000);
-    TIM2->CCR1 = 400;
-    delay(1000);
-       TIM2->CCR1 = 300;
-       delay(1000);
-          TIM2->CCR1 = 200;
-          delay(1000);
-             TIM2->CCR1 = 100;
 
+ uint32_t counterAcquisition = 0;
   while (1)
   {
     /* USER CODE END WHILE */
+
+	  dispManager1.run(atGetSysTick_ms());
+	  spiManager.handle();
+
+	  if(flagTask10ms)
+	  {
+		  flagTask10ms = 0;
+		  HAL_GPIO_TogglePin(OUT_LED_GPIO_Port, OUT_LED_Pin);
+
+
+		  counterAcquisition++;
+
+		  if(counterAcquisition >= 50  )
+		  {
+			  counterAcquisition = 0;
+
+			  imuDataType imuData;
+			  for(int i= 0; i < imuManager.getImuCount(); i++)
+			  {
+			  /// Refresh IMU DATA
+			  imuManager.requestAccel(i);
+			  imuManager.requestGyro(i);
+			  //imuManager.requestMag(i); //mag not supported with LSM6
+
+				  //imuData = imuManager.getImuData(i); // Alternatively we could have use this to get all data one shot
+
+			  /// Display received data
+
+				  sprintf(serialOutLine, "\n\n\rIMU %d -----------------------\n\r",i);
+				  HAL_UART_Transmit(&hlpuart1, (uint8_t*)serialOutLine, strlen(serialOutLine), HAL_MAX_DELAY);
+
+				  if(imuManager.newAccelData(i))
+				  {
+					  imuData.accel = imuManager.getAccel(i);
+					  sprintf(serialOutLine, "accel x: %f accel y: %f accel z: %f \n\r", imuData.accel.x,imuData.accel.y,imuData.accel.z);
+					  HAL_UART_Transmit(&hlpuart1, (uint8_t*)serialOutLine, strlen(serialOutLine), HAL_MAX_DELAY);
+				  }
+
+				  if(imuManager.newGyroData(i))
+				  {
+					  imuData.gyro = imuManager.getGyro(i);
+					  sprintf(serialOutLine, "Gyro x: %f Gyro y: %f Gyro z: %f \n\r", imuData.gyro.x, imuData.gyro.y, imuData.gyro.z);
+					  HAL_UART_Transmit(&hlpuart1, (uint8_t*)serialOutLine, strlen(serialOutLine), HAL_MAX_DELAY);
+				  }
+
+				  if(imuManager.newMagData(i))
+				  {
+					  imuData.mag = imuManager.getMag(i);
+					  sprintf(serialOutLine, "Mag x: %f Mag y: %f Mag z: %f \n\r", imuData.mag.x, imuData.mag.y, imuData.mag.z);
+					  HAL_UART_Transmit(&hlpuart1, (uint8_t*)serialOutLine, strlen(serialOutLine), HAL_MAX_DELAY);
+				  }
+
+			  }
+			  char line1[40];
+			  char line2[40];
+			  char line3[40];
+			  sprintf(line1, "x:%.2f", imuData.accel.x);
+			  sprintf(line2, "y:%.2f", imuData.accel.y);
+			  sprintf(line3, "z:%.2f", imuData.accel.z);
+
+#define SUBMENU_WIDTH	100
+#define SUBMENU_HEIGHT	60
+#define START_X	(120-SUBMENU_WIDTH)
+#define START_Y 20
+#define TITLE_HEIGHT 30
+			  dispManager1.display->clearDisplay(BLACK);
+			  dispManager1.widget_1row(START_X+20, START_Y, SUBMENU_WIDTH-20, TITLE_HEIGHT,
+					  "ACCEL", TEXTSTYLE_SIZE_2|GREEN,
+					  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
+
+			  dispManager1.widget_3Row(START_X, START_Y+TITLE_HEIGHT, SUBMENU_WIDTH, SUBMENU_HEIGHT,
+					  line1, TEXTSTYLE_SIZE_2|WHITE,
+					  line2, TEXTSTYLE_SIZE_2|WHITE,
+					  line3, TEXTSTYLE_SIZE_2|WHITE,
+			 			W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
+
+			  sprintf(line1, "x:%.2f", imuData.gyro.x);
+			  sprintf(line2, "y:%.2f", imuData.gyro.y);
+			  sprintf(line3, "z:%.2f", imuData.gyro.z);
+			  dispManager1.widget_1row(120, START_Y, SUBMENU_WIDTH-20, TITLE_HEIGHT,
+								  "GYRO", TEXTSTYLE_SIZE_2|GREEN,
+								  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
+			  dispManager1.widget_3Row(120, START_Y+TITLE_HEIGHT, SUBMENU_WIDTH, SUBMENU_HEIGHT,
+							  line1, TEXTSTYLE_SIZE_2|WHITE,
+							  line2, TEXTSTYLE_SIZE_2|WHITE,
+							  line3, TEXTSTYLE_SIZE_2|WHITE,
+					 			W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
+			  dispManager1.display->drawLine(0, 120, 240, 120, BLUE);
+			  dispManager1.display->drawLine(120, 0, 120, 120, BLUE);
+
+//				dispManager1.display->clearDisplay(BLACK);
+//				dispManager1.widget_1row(10, 20, 220, 20,
+//					  "ACCEL", TEXTSTYLE_SIZE_2|GREEN,
+//					  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
+//
+//				dispManager1.widget_3Row(10, 40, 220, 60,
+//					  line1, TEXTSTYLE_SIZE_2|WHITE,
+//					  line2, TEXTSTYLE_SIZE_2|WHITE,
+//					  line3, TEXTSTYLE_SIZE_2|WHITE,
+//						W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
+//
+//				sprintf(line1, "x:%f", imuData.gyro.x);
+//				sprintf(line2, "y:%f", imuData.gyro.y);
+//				sprintf(line3, "z:%f", imuData.gyro.z);
+//				dispManager1.widget_1row(10, 120, 220, 20,
+//								  "GYRO", TEXTSTYLE_SIZE_2|GREEN,
+//								  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
+//				dispManager1.widget_3Row(10, 120+20, 220, 60,
+//							  line1, TEXTSTYLE_SIZE_2|WHITE,
+//							  line2, TEXTSTYLE_SIZE_2|WHITE,
+//							  line3, TEXTSTYLE_SIZE_2|WHITE,
+//								W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
+
+			  dispManager1.display->display();
+
+		  }
+
+	  }
+
 
     /* USER CODE BEGIN 3 */
   }
@@ -329,6 +498,27 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 	}
 }
 
+
+//void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+ void HAL_LPTIM_AutoReloadMatchCallback(LPTIM_HandleTypeDef *hlptim)
+//void HAL_LPTIM_CompareMatchCallback(LPTIM_HandleTypeDef *hlptim)
+{
+
+	if(hlptim->Instance == hlptim1.Instance)
+	{
+		task10msTimer--;
+			if (task10msTimer <= 0)
+			{
+				task10msTimer = TASK10MS_COUNTER;
+				flagTask10ms = true;
+			}
+
+
+			HAL_LPTIM_Counter_Start_IT(&hlptim1, LPTIMER_PERIOD);
+	}
+
+
+}
 /* USER CODE END 4 */
 
 /**
