@@ -197,11 +197,16 @@ int main(void)
 	if (imuInitStatus) // Error
 	{
 		char errorCode[40];
-		sprintf(errorCode, "x:%d", imuInitStatus);
+		sprintf(errorCode, "Code:%d", imuInitStatus);
 		dispManager1.widget_2Row(40, 40, 160, 160,
 		  "IMU ERROR", TEXTSTYLE_SIZE_3|RED,
 		  errorCode, TEXTSTYLE_SIZE_2|WHITE,
 		  W_CENTER_ALIGN, 0, BORDERSTYLE_CIRCLE|BLUE);
+
+		dispManager1.display->display();
+		display1.waitForTxComplete();
+
+		delay(5000);
 	}
 
 
@@ -219,11 +224,11 @@ int main(void)
 			  W_CENTER_ALIGN, 0, BORDERSTYLE_CIRCLE|BLUE);
 	dispManager1.display->display();
 	display1.waitForTxComplete();
-	dispManager1.display->display();
-	display1.waitForTxComplete();
+//	dispManager1.display->display();
+//	display1.waitForTxComplete();
 
     // test de luminosité
-	delay(100);
+	delay(1500);
 	TIM2->CCR1 = 600;
 	delay(100);
 	TIM2->CCR1 = 500;
@@ -238,9 +243,10 @@ int main(void)
 	delay(100);
 	TIM2->CCR1 = 200;
 	dispManager1.display->clearDisplay(BLACK);
+	dispManager1.display->display();
 	display1.waitForTxComplete();
 	delay(1000);
-	TIM2->CCR1 = 750;
+	TIM2->CCR1 = 1000;
 
 
  uint32_t counterAcquisition = 0;
@@ -266,14 +272,16 @@ int main(void)
 			  imuDataType imuData;
 			  for(int i= 0; i < imuManager.getImuCount(); i++)
 			  {
-			  /// Refresh IMU DATA
-			  imuManager.requestAccel(i);
-			  imuManager.requestGyro(i);
-			  //imuManager.requestMag(i); //mag not supported with LSM6
+				  /// Refresh IMU DATA
+				  imuManager.requestAccel(i);
+				  imuManager.requestGyro(i);
+				  //imuManager.requestMag(i); //mag not supported with LSM6
 
 				  //imuData = imuManager.getImuData(i); // Alternatively we could have use this to get all data one shot
 
 			  /// Display received data
+
+
 
 				  sprintf(serialOutLine, "\n\n\rIMU %d -----------------------\n\r",i);
 				  HAL_UART_Transmit(&hlpuart1, (uint8_t*)serialOutLine, strlen(serialOutLine), HAL_MAX_DELAY);
@@ -281,54 +289,61 @@ int main(void)
 				  if(imuManager.newAccelData(i))
 				  {
 					  imuData.accel = imuManager.getAccel(i);
-					  sprintf(serialOutLine, "accel x: %f accel y: %f accel z: %f \n\r", imuData.accel.x,imuData.accel.y,imuData.accel.z);
-					  HAL_UART_Transmit(&hlpuart1, (uint8_t*)serialOutLine, strlen(serialOutLine), HAL_MAX_DELAY);
+				  }
+				  else
+				  {
+					  imuData.accel.x = 0.0;
+					  imuData.accel.y = 0.0;
+					  imuData.accel.z = 0.0;
 				  }
 
 				  if(imuManager.newGyroData(i))
 				  {
 					  imuData.gyro = imuManager.getGyro(i);
-					  sprintf(serialOutLine, "Gyro x: %f Gyro y: %f Gyro z: %f \n\r", imuData.gyro.x, imuData.gyro.y, imuData.gyro.z);
-					  HAL_UART_Transmit(&hlpuart1, (uint8_t*)serialOutLine, strlen(serialOutLine), HAL_MAX_DELAY);
 				  }
-
-				  if(imuManager.newMagData(i))
+				  else
 				  {
-					  imuData.mag = imuManager.getMag(i);
-					  sprintf(serialOutLine, "Mag x: %f Mag y: %f Mag z: %f \n\r", imuData.mag.x, imuData.mag.y, imuData.mag.z);
-					  HAL_UART_Transmit(&hlpuart1, (uint8_t*)serialOutLine, strlen(serialOutLine), HAL_MAX_DELAY);
+					  imuData.gyro.x = 0.0;
+					  imuData.gyro.y = 0.0;
+					  imuData.gyro.z = 0.0;
 				  }
 
 			  }
-			  char line1[40];
-			  char line2[40];
-			  char line3[40];
-			  sprintf(line1, "x:%.2f", imuData.accel.x);
-			  sprintf(line2, "y:%.2f", imuData.accel.y);
-			  sprintf(line3, "z:%.2f", imuData.accel.z);
+
+
 
 #define SUBMENU_WIDTH	100
 #define SUBMENU_HEIGHT	60
 #define START_X	(120-SUBMENU_WIDTH)
 #define START_Y 20
 #define TITLE_HEIGHT 30
+			  char line1[40];
+			  char line2[40];
+			  char line3[40];
+
 			  dispManager1.display->clearDisplay(BLACK);
 			  dispManager1.widget_1row(START_X+20, START_Y, SUBMENU_WIDTH-20, TITLE_HEIGHT,
 					  "ACCEL", TEXTSTYLE_SIZE_2|GREEN,
 					  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
 
+
+			  sprintf(line1, "x:%.2f", imuData.accel.x);
+			  sprintf(line2, "y:%.2f", imuData.accel.y);
+			  sprintf(line3, "z:%.2f", imuData.accel.z);
 			  dispManager1.widget_3Row(START_X, START_Y+TITLE_HEIGHT, SUBMENU_WIDTH, SUBMENU_HEIGHT,
 					  line1, TEXTSTYLE_SIZE_2|WHITE,
 					  line2, TEXTSTYLE_SIZE_2|WHITE,
 					  line3, TEXTSTYLE_SIZE_2|WHITE,
 			 			W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
 
-			  sprintf(line1, "x:%.2f", imuData.gyro.x);
-			  sprintf(line2, "y:%.2f", imuData.gyro.y);
-			  sprintf(line3, "z:%.2f", imuData.gyro.z);
+
 			  dispManager1.widget_1row(120, START_Y, SUBMENU_WIDTH-20, TITLE_HEIGHT,
 								  "GYRO", TEXTSTYLE_SIZE_2|GREEN,
 								  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
+
+			  sprintf(line1, "x:%.2f", imuData.gyro.x);
+			  sprintf(line2, "y:%.2f", imuData.gyro.y);
+			  sprintf(line3, "z:%.2f", imuData.gyro.z);
 			  dispManager1.widget_3Row(120, START_Y+TITLE_HEIGHT, SUBMENU_WIDTH, SUBMENU_HEIGHT,
 							  line1, TEXTSTYLE_SIZE_2|WHITE,
 							  line2, TEXTSTYLE_SIZE_2|WHITE,
@@ -336,29 +351,6 @@ int main(void)
 					 			W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
 			  dispManager1.display->drawLine(0, 120, 240, 120, BLUE);
 			  dispManager1.display->drawLine(120, 0, 120, 120, BLUE);
-
-//				dispManager1.display->clearDisplay(BLACK);
-//				dispManager1.widget_1row(10, 20, 220, 20,
-//					  "ACCEL", TEXTSTYLE_SIZE_2|GREEN,
-//					  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
-//
-//				dispManager1.widget_3Row(10, 40, 220, 60,
-//					  line1, TEXTSTYLE_SIZE_2|WHITE,
-//					  line2, TEXTSTYLE_SIZE_2|WHITE,
-//					  line3, TEXTSTYLE_SIZE_2|WHITE,
-//						W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
-//
-//				sprintf(line1, "x:%f", imuData.gyro.x);
-//				sprintf(line2, "y:%f", imuData.gyro.y);
-//				sprintf(line3, "z:%f", imuData.gyro.z);
-//				dispManager1.widget_1row(10, 120, 220, 20,
-//								  "GYRO", TEXTSTYLE_SIZE_2|GREEN,
-//								  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
-//				dispManager1.widget_3Row(10, 120+20, 220, 60,
-//							  line1, TEXTSTYLE_SIZE_2|WHITE,
-//							  line2, TEXTSTYLE_SIZE_2|WHITE,
-//							  line3, TEXTSTYLE_SIZE_2|WHITE,
-//								W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
 
 			  dispManager1.display->display();
 
@@ -499,9 +491,8 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 }
 
 
-//void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+
  void HAL_LPTIM_AutoReloadMatchCallback(LPTIM_HandleTypeDef *hlptim)
-//void HAL_LPTIM_CompareMatchCallback(LPTIM_HandleTypeDef *hlptim)
 {
 
 	if(hlptim->Instance == hlptim1.Instance)
