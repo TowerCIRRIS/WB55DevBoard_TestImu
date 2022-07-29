@@ -17,6 +17,7 @@
   */
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
+#include <ButtonPollingManager_V2.3.h>
 #include "main.h"
 #include "adc.h"
 #include "crc.h"
@@ -38,7 +39,6 @@
 #include "dmaspi_comm_stm32_V1.0.0.h" // For SPI display
 #include "oledDisplayManager_V1_1.h"
 #include "teamAt_GC9A01_dma_V1_0.h"
-
 #include "imu.h"
 
 #include <String>
@@ -51,6 +51,24 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define SUBMENU_WIDTH	100
+#define SUBMENU_HEIGHT	60
+#define START_X	(120-SUBMENU_WIDTH)
+#define START_Y 20
+#define TITLE_HEIGHT 30
+
+#define BUTTONS_POS_Y	125
+#define BUTTONS_TITLE_HEIGHT 12
+#define BUTTONS_SPACING	54
+#define BUTTONS_WIDTH	50
+
+#define BUTTON_1_POS_X	120-(BUTTONS_SPACING * 2)
+#define BUTTON_2_POS_X	120-(BUTTONS_SPACING )
+#define BUTTON_3_POS_X	120+(BUTTONS_SPACING )
+#define BUTTON_4_POS_X	120+(BUTTONS_SPACING * 2)
+
+#define BUTTON_POS_X(x) (BUTTON_1_POS_X + (BUTTONS_SPACING - BUTTONS_WIDTH)/2  + x*BUTTONS_SPACING)
+
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -97,7 +115,23 @@ oledDisplayManager dispManager1(
 
 
 
+ButtonPollingManager buttonManager;
 
+#define NB_BUTTONS 4
+
+managedButton buttonList[NB_BUTTONS] ={
+		{IN_B1_Pin, (uint32_t *)IN_B1_GPIO_Port, ACTIVE_LOW, CLICK_ENABLE | /*DOUBLECLICK_ENABLE | LONGCLICK_ENABLE |*/ HOLD_ENABLE},
+		{IN_B2_Pin, (uint32_t *)IN_B2_GPIO_Port, ACTIVE_LOW, CLICK_ENABLE | /*DOUBLECLICK_ENABLE | LONGCLICK_ENABLE |*/ HOLD_ENABLE},
+		{IN_B3_Pin, (uint32_t *)IN_B3_GPIO_Port, ACTIVE_LOW, CLICK_ENABLE | /*DOUBLECLICK_ENABLE | LONGCLICK_ENABLE |*/ HOLD_ENABLE},
+		{IN_B4_Pin, (uint32_t *)IN_B4_GPIO_Port, ACTIVE_LOW, CLICK_ENABLE | /*DOUBLECLICK_ENABLE | LONGCLICK_ENABLE |*/ HOLD_ENABLE}
+
+};
+
+char buttonText[NB_BUTTONS][20];
+	 char buttonTitle[NB_BUTTONS][20];
+
+
+void buttonEventManagement();
 
 /* USER CODE END PV */
 
@@ -174,6 +208,8 @@ int main(void)
   	HAL_LPTIM_Counter_Start_IT(&hlptim1, LPTIMER_PERIOD);
 
 
+
+  	buttonManager.init(NB_BUTTONS,buttonList);
 
 
 	// Initialisation Display
@@ -254,6 +290,8 @@ int main(void)
   {
     /* USER CODE END WHILE */
 
+	  buttonManager.handle(atGetSysTick_ms());	// Run the button manager
+	  buttonEventManagement();		// Attache tasks or code to the button events
 	  dispManager1.run(atGetSysTick_ms());
 	  spiManager.handle();
 
@@ -265,7 +303,7 @@ int main(void)
 
 		  counterAcquisition++;
 
-		  if(counterAcquisition >= 50  )
+		  if(counterAcquisition >= 10  )
 		  {
 			  counterAcquisition = 0;
 
@@ -310,13 +348,6 @@ int main(void)
 
 			  }
 
-
-
-#define SUBMENU_WIDTH	100
-#define SUBMENU_HEIGHT	60
-#define START_X	(120-SUBMENU_WIDTH)
-#define START_Y 20
-#define TITLE_HEIGHT 30
 			  char line1[40];
 			  char line2[40];
 			  char line3[40];
@@ -326,7 +357,6 @@ int main(void)
 					  "ACCEL", TEXTSTYLE_SIZE_2|GREEN,
 					  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
 
-
 			  sprintf(line1, "x:%.2f", imuData.accel.x);
 			  sprintf(line2, "y:%.2f", imuData.accel.y);
 			  sprintf(line3, "z:%.2f", imuData.accel.z);
@@ -335,7 +365,6 @@ int main(void)
 					  line2, TEXTSTYLE_SIZE_2|WHITE,
 					  line3, TEXTSTYLE_SIZE_2|WHITE,
 			 			W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
-
 
 			  dispManager1.widget_1row(120, START_Y, SUBMENU_WIDTH-20, TITLE_HEIGHT,
 								  "GYRO", TEXTSTYLE_SIZE_2|GREEN,
@@ -351,6 +380,20 @@ int main(void)
 					 			W_CENTER_ALIGN, 0, BORDERSTYLE_NONE);
 			  dispManager1.display->drawLine(0, 120, 240, 120, BLUE);
 			  dispManager1.display->drawLine(120, 0, 120, 120, BLUE);
+
+			  for(int i = 0 ; i < NB_BUTTONS; i++)
+			  {
+
+				  dispManager1.widget_1row(BUTTON_POS_X(i), BUTTONS_POS_Y, BUTTONS_WIDTH, BUTTONS_WIDTH,
+				  			 	 			 				  	  	  	  buttonTitle[i], TEXTSTYLE_SIZE_1|YELLOW,
+				  			 	 			 							  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_NONE);
+
+				  dispManager1.widget_1row(BUTTON_POS_X(i), BUTTONS_POS_Y+BUTTONS_TITLE_HEIGHT, BUTTONS_WIDTH, BUTTONS_WIDTH,
+				  								  buttonText[i], TEXTSTYLE_SIZE_1|GREEN,
+				  								  W_CENTER_ALIGN, 0, 0, BORDERSTYLE_CIRCLE_CONTAINED|WHITE);
+
+			  }
+
 
 			  dispManager1.display->display();
 
@@ -510,6 +553,67 @@ void HAL_SPI_TxCpltCallback(SPI_HandleTypeDef *hspi)
 
 
 }
+
+
+
+
+
+ /**
+  * @fn void buttonEventManagement()
+  * @brief Used to map code / tasks to button events
+  *
+  */
+ void buttonEventManagement()
+ {
+
+
+
+
+	for(int i = 0 ; i< NB_BUTTONS ; i++)
+	{
+		bool eventDetect;
+
+		sprintf(buttonTitle[i],"Btn %d",i);
+		eventDetect = false;
+	 	if(buttonManager.getClickEvent(i)) //Button 1 click
+	 	{
+	 	 // digitalPinWrite(OUT_LED_Pin,OUT_LED_GPIO_Port,GPIO_PIN_SET);
+
+	 	  sprintf(buttonText[i],"click");
+	 	 eventDetect = true;
+	 	}
+
+	 	if(buttonManager.getHoldEvent(i)) //Button 1 hold
+	 	{
+
+	 		sprintf(buttonText[i],"hold");
+	 		eventDetect = true;
+	 	}
+
+	 	if(buttonManager.getLongClickEvent(i)) //Button 1 long click
+	 	{
+	 		sprintf(buttonText[i],"L click");
+	 		eventDetect = true;
+
+	 	}
+
+	 	if(buttonManager.getDoubleClickEvent(i)) // Button 1 double click
+	 	{
+	 		sprintf(buttonText[i],"D click");
+	 		eventDetect = true;
+	 	}
+
+	 	//if(eventDetect)
+	 	//{
+
+	 	//}
+	}
+
+
+
+
+ }
+
 /* USER CODE END 4 */
 
 /**
